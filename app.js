@@ -1,23 +1,47 @@
 const Discord = require("discord.js");
 const client = new Discord.Client();
 const fs = require("fs");
-const bitlyAPI = require("node-bitlyapi");
-const config = require("./Data/config/globalconfig.json");
-const path = require("path");
-const mkdirp = require("mkdirp");
-const directory = path.dirname(require.main.filename);
-require("dotenv").config();
-console.log("Loaded all required modules");
-var workingDirectory = directory + "/data/guilds/";
+const { urlToHttpOptions } = require("http");
+const { runInThisContext } = require("vm");
+const configPath = require("./Data/config/config.json");
 
-function uuidv4() {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-    });
+class Error {
+    static DELETE(error) {
+        return `Failed to delete "${error}" from commands list, it either does not exist or you mistyped. If you think this is an error please contact an administrator.`;
+    }
+
+    static FIND(error) {
+        return `Failed to find command "${error}", it either does not exist or you mistyped. If you think this is an error please contact an administrator.`;
+    }
+
+    static SYNTAX(error) {
+        return `Invalid syntax.`;
+    }
+
+    static FILEWRITE(error) {
+        return `An error has occured writing "${error}."`;
+    }
+    
+    static GENERIC(error) {
+        return `A generic error has occured - ${error} - this should only be flagged in DEBUG mode`;
+    }
 }
 
-const guildTemplate = {
+class Success {
+    static CREATE(command) {
+        return `Created ${command}`;
+    }
+
+    static DELETE(command) {
+        return `Deleted ${command}`
+    }
+
+    static ADDED(command, argument) {
+        return `Added ${argument} to ${command}`
+    }
+}
+
+const guildTemplate = { 
     "config": {
         "dadChance": 0,
         "dadMode": true,
@@ -28,185 +52,262 @@ const guildTemplate = {
 
     }, 
     "metadata": {
-        "amountOfCommands": 0 //TODO implement this lol
+        "allowedCommandLimit": 0 //TODO implement this lol
     }
 }
 
-function randomInt(max) {
-    return Math.floor(Math.random() * Math.floor(max));
+const commandTemplate = {
+    "data": {
+
+    }
 }
 
-function sarcasm(message) {
-    message.shift();
-    message = message.join(" ").split("")
-    for (let i = 0; i < message.length; i++) {
-        let rng = randomInt(2)
-        if (rng === 0) {
-            message[i] = message[i].toUpperCase();
-        }
+const emojiSetEntity = {
+    "walkable": false,
+    "encounterChance": 0,
+    "interactable": {
+        "itemToInteract": "none",
+        "droppedItem": "none", 
+        "referencedEntity": "none"
+    },
+    "spawnableEnemies": {
+
     }
-    return message.join("");
 }
 
-function dadMode(content) {
-    for (let i = 0; i < content.length; i++) {
-        if (content[i] === "im" || content[i] === "i'm") {
-            RNG = randomInt(config.dadChance);
-            if (RNG === 1) {
-                let dadQuote = msgSplit.splice(i + 1);
-                dadQuote = dadQuote.join(" ");
-                return dadQuote;
-            }
-        }
-    }
+const emojiMobEntity = {
+    "damage" : 0,
+    "missChance": 0,
+    "evasionChance": 0,
+    "rarity": 0
 }
-//                        message  , true/false, location of guild file
-function JSONManipulation(contentArgs, command, guildDir) {
-    contentArgs[0] = contentArgs[0].replace("!", "");
-    jsonDir = guildDir + "/data.json"; 
-    dataDir = guildDir + "/data/"
-    try {
-        var json = JSON.parse(fs.readFileSync(jsonDir));
-    } catch (err) {
-        return `An error has occured: ${err}`;
+
+class Directories {
+
+    static COMMANDSTREE (guildID) {
+        return `./Guilds/data/${guildID}/commands/`;
     }
-    let length = Object.keys(json).length;
-    if (command === true) { //TODO Deny null requests and repeat requests
-        if (contentArgs[1] === "add") {
-            UUID = uuidv4();
-            json.commands[contentArgs[2]] = UUID + ".json"; //Creating new element within json NOTE: APPENDS .JSON TO THE END OF THE FILE NAME
-            fs.writeFileSync(jsonDir, JSON.stringify(json, null, 2));
-            dataDir = dataDir + UUID + ".json";
-            fs.writeFile(dataDir, "{}", function (err) {
+
+    static DATA (guildID) {
+        return `./Guilds/data/${guildID}/data.json`;
+    }
+
+    static SPECIFICCOMMAND (guildID, command) {
+        return new Promise((resolve, reject) => {
+            fs.readFile(this.DATA(guildID), (err, data) => {
+
                 if (err) {
-                    console.log(err);
-                } else {
-                    console.log("Custom command created");
+                    reject(Error.FIND(command));
+                } 
+
+                let json = JSON.parse(data);
+                var uuid = json.commands[command]; 
+
+                resolve(`./Guilds/data/${guildID}/commands/${uuid}.json`);
+            });
+        })
+    }
+}
+
+class EntityMobGenerators {
+    constructor() {
+        this.jsonMobEntity = emojiMobEntity;
+    }
+
+    damage(int) {
+        this.jsonMobEntity.damage = int;
+        return this;
+    }
+
+    missChance(int) {
+        this.jsonMobEntity.missChance = int;
+        return this;
+    }
+
+    evasionChance(int) {
+        this.jsonMobEntity.evasionChance = int;
+        return this;
+    }
+
+    rarity(int) {
+        this.jsonMobEntity.rarity = int;
+        return this;
+    }
+
+    returnJSON() {
+        return this.jsonMobEntity;
+    }
+
+
+}
+
+class EntitySetGenerators {
+    constructor() {
+        this.jsonSetEntity = emojiSetEntity;
+    }
+
+    walkable(bool) {
+        this.jsonSetEntity.walkable = bool;
+        return this;
+    }
+
+    encounterChance(int) {
+        this.jsonSetEntity.encounterChance = int;
+        return this;
+    }
+
+    itemToInteract(str) {
+        this.jsonSetEntity.interactable.itemToInteract = str;
+        return this;
+    }
+
+    droppedItem(str) {
+        this.jsonSetEntity.interactable.droppedItem = str;
+        return this;
+    }
+
+    referencedEntity(str) {
+        this.jsonSetEntity.interactable.referencedEntity = str;
+        return this;
+    }
+
+    spawnableEnemies(str, EntityMobGenerators) {
+        this.jsonSetEntity.spawnableEnemies[str] = EntityMobGenerators;
+        return this;
+    }
+
+    returnJSON() {
+        return JSON.stringify(this.jsonSetEntity);
+    }
+}
+
+class Generators {
+
+    static createGuildJSON(guildID) {
+        fs.mkdirSync(Directories.COMMANDSTREE(guildID), { recursive: true}, (err) => { //TODO: Sync is not good for servers -- remove later
+            if (err) {
+                console.log(Error.GENERIC(err));
+            }
+        });
+        fs.writeFile(Directories.DATA(guildID), JSON.stringify(guildTemplate, null, 2), (err) => {
+            if (err) {
+                console.log(Error.GENERIC(err));
+            }
+        })
+    };
+
+    static createCommandJSON(guildID, command) {
+        fs.readFile(Directories.DATA, (err, data) => {
+            if (err) {
+                console.log(Error.GENERIC(err));
+            }
+
+            var json = JSON.parse(data);
+
+            var identity = UUID.uuidv4(); //TODO: Do not generate UUID if command already exists
+
+            json.commands[command] = identity;
+            fs.writeFile(`./Guilds/data/${guildID}/data.json`, JSON.stringify(json, null, 2), (err) => {
+                if (err) {
+                    console.log(Error.GENERIC(err));
+                }
+            }) //Writes command template to file
+            fs.appendFile(`./Guilds/data/${guildID}/commands/${identity}.json`, JSON.stringify(commandTemplate, null, 2), (err) => {
+                if (err) {
+                    console.log(Error.GENERIC(err))
+                }
+                else {
+                    console.log(Success.CREATE(command))
                 }
             })
-            return `Added "${contentArgs[2]}" to commands`;
-        } else if (contentArgs[1] === "delete") {
-            try {
-                delete json.commands[contentArgs[2]]
-                return `Deleted "${contentArgs[2]}" from commands list`
-            } catch (err) {
-                console.log(err);
-                return `Failed to delete "${contentArgs[2]}" from commands list, it either does not exist or you mistyped. If you think this is an error please contact an administrator.`
-            }
-        } else if (contentArgs[1] === "edit") {
-            let UUID = json.commands[contentArgs[2]]
-            dataDir = dataDir + UUID
-            console.log(dataDir);
-            try {
-                let customCommand = JSON.parse(fs.readFileSync(dataDir)); //Reads command json
-                console.log(customCommand);
-                if (contentArgs[3] === "add") {
-                    let length = Object.keys(customCommand).length;
-                    customCommand[length + 1] = contentArgs[4];
-                    fs.writeFileSync(dataDir, JSON.stringify(customCommand, null, 2));
-                    return `Added ${contentArgs[4]} to ${contentArgs[2]}`
-                } else if (contentArgs[3] === "remove") {
-                    
-                }
-            } catch (err) {
-                console.log(err);
-                return `Failed to find command "${contentArgs[2]}", it either does not exist or you mistyped. If you think this is an error please contact an administrator.`;
-            }
-            
-        } else {
-            return `Invalid Syntax`;
-        }
-    } else if (command === false) {
-        let UUID = json.commands[contentArgs[0]]; //Reads UUID of command from data.json
-        console.log(`UUID: ${UUID}`);
-        dataDir = dataDir + UUID
-        try {
-            /*if (typeof contentArgs[1] === "undefined" || parseInt(contentArgs[1]) > Object.keys(json).length || isNaN(contentArgs[1]) === true || contentArgs[1] === null) {
-                contentArgs[1] = Math.floor(Math.random() * length) + 1;
-            }*/
-            let jsonCommand = JSON.parse(fs.readFileSync(dataDir));
-            return jsonCommand[contentArgs[1]];
-        } catch (err) {
-            console.log(err);
-        }
+        });
     }
 }
 
-try {
+class ChangeJSONData {
+
+    static async addJSONData (guildID, command, data) { //TODO: implement subcommand limit
+        var dir = await Directories.SPECIFICCOMMAND(guildID, command);
+        fs.readFile(dir, (err, fileData) => {
+            if (err) {
+                console.log(Error.GENERIC(command));
+            }
+            let json = JSON.parse(fileData);
+            json.data[Object.keys(json.data).length + 1] = data
+            fs.writeFile(dir, JSON.stringify(json), (err) => {
+                if (err) {
+                    console.log(Error.GENERIC(data));
+                } else {
+                    console.log(Success.CREATE(data));
+                }
+            })
+        })
+    }
+
+    static async removeJSONData (guildID, command, identifier) {   
+        var dir = await Directories.SPECIFICCOMMAND(guildID, command);
+        fs.readFile(dir, (err, fileData) => {
+            if (err) {
+                console.log(Error.GENERIC(command));
+            }
+            let json = JSON.parse(fileData)
+            delete json.data[identifier]
+            fs.writeFile(dir, JSON.stringify(json), (err) => {
+                console.log(Success.DELETE(command));
+            })
+            //this.reshuffle();
+        })
+    }
+
+    reshuffle() {
+        //TODO: Re-shuffle data in command
+    }
+}
+
+class UUID {
+    static uuidv4() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+}
+
+/*try {
     client.on("ready", () => {
         console.log(`Logged in as ${client.user.tag}`);
-        client.user.setPresence({ game: { name: config.status }, status: "online" });
-    });
-    client.on("guildCreate", guildCreation => {
-        console.log(`Joined ${guildCreation.name}`);
-        let guildDir = workingDirectory + guildCreation.id;
-        let commands = guildDir + "/data.json";
-        let data = guildDir + "/data/"
-        guildJSON = JSON.stringify(guildTemplate, null, 2)
-        mkdirp(data).then(made =>
-            fs.writeFile(commands, guildJSON, function (err) {
-                if (err) {
-                    console.log(err);
-                } else {
-                    console.log("Data JSON Created");
-                }
-            }),
-        ),
-        guildCreation.roles.create({
-            data: {
-                name: "The Overlord",
-            },
-            reason: "The Galvinator needs to knows who he can interact with."
-        })
-    });
-    client.on("message", message => {
+    })
+
+    client.on("guildCreate", guildCreate => {
+        console.log(Generators.createGuildJSON(guildCreate.id));
+    })
+
+    client.on("message", async message => {
         var content = message.content;
-        var contentArgs = content.split(" ");
-        var authorID = message.author.id;
+        var author = message.author;
         var guildID = message.guild.id;
-        var guildDir = workingDirectory + guildID;
-        var dataJSON = JSON.parse(fs.readFileSync(guildDir + "/data.json")); //TODO Cache this 
-        var found = false;
-        if (authorID !== 451895471305392138) {
-            content = content.toLowerCase();
-            /*if (dataJSON.config["dadMode"] === true) {
-                message.channel.send(dadMode(contentArgs));
-            }*/
-            if (dataJSON.config["commandMode"] === true) {
-                let length = Object.keys(dataJSON).length
-                if (length === 0) {
-                    length = 1;
-                }
-                //console.log(length);
-                for (let i = 0; i < 3; i++) { //TODO Update how it calculates the length of the json file.
-                    let prefixStripped = contentArgs[0].replace(dataJSON.config["prefix"], "");
-                    if (prefixStripped in dataJSON.commands) {
-                        found = true;
-                    }
-                }
-                if (found === true) {
-                    message.channel.send(JSONManipulation(contentArgs, false, guildDir));
-                    found = false;
-                }
-            }
-            if (dataJSON.config["createCommands"] === true /*&& (message.member.roles.cache.has(message.guild.roles.cache.find(role => role.name === "The Overlord")) === true*/ && content.startsWith(dataJSON.config["prefix"] + "command"))/*)*/ {
-                message.channel.send(JSONManipulation(contentArgs, true, guildDir));
-            }
-            if (contentArgs[0] === ((dataJSON.config["prefix"]) + "help")) {
-                message.channel.send(`The list of integrated commands:
-!command (WIP)
-    - add | Adds a new command that people can use 
-    - delete | Removes a command that people can use 
-    - list | Lists commands
-    - edit <command> | Allows the command to be edited using the two sub commands
-        - add | Adds data to the specified command
-        - delete | Removes data from the specified command.`)
-            }
-        } else {
-            console.log("what the fuck");
-        }
-    });
-    client.login(config.discordToken);
-} catch (err){
-    console.error(err);
+
+    })
+    client.login(configPath.discordToken);
 }
+
+catch (err) {
+    console.log(Error.GENERIC(err));
+}*/
+
+//Generators.createGuildJSON("0");
+//Generators.createCommandJSON("0", "testGuild");
+
+async function main() {
+    console.log(new EntitySetGenerators()
+        .walkable(true)
+        .encounterChance(1)
+        .droppedItem("itemtest")
+        .spawnableEnemies("test", new EntityMobGenerators()
+            .damage(542)
+            .evasionChance(2)
+            .returnJSON())
+        .returnJSON());
+}
+
+main()
