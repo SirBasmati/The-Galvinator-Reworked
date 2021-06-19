@@ -1,9 +1,15 @@
 const Discord = require("discord.js");
 const client = new Discord.Client();
 const fs = require("fs");
-const { urlToHttpOptions } = require("http");
-const { runInThisContext } = require("vm");
+const emojiUnicode = require("emoji-unicode");
 const configPath = require("./Data/config/config.json");
+const { Console } = require("console");
+
+class Game {
+    constructor() {
+
+    }
+}
 
 class Error {
     static DELETE(error) {
@@ -63,6 +69,8 @@ const commandTemplate = {
 }
 
 const emojiSetEntity = {
+    "unicodeChar": "none",
+    "name": "none",
     "walkable": false,
     "encounterChance": 0,
     "interactable": {
@@ -76,6 +84,7 @@ const emojiSetEntity = {
 }
 
 const emojiMobEntity = {
+    "unicodeChar": "none",
     "damage" : 0,
     "missChance": 0,
     "evasionChance": 0,
@@ -83,6 +92,7 @@ const emojiMobEntity = {
 }
 
 class Directories {
+
 
     static COMMANDSTREE (guildID) {
         return `./Guilds/data/${guildID}/commands/`;
@@ -111,34 +121,33 @@ class Directories {
 
 class EntityMobGenerators {
     constructor() {
-        this.jsonMobEntity = emojiMobEntity;
+        this.jsonMobEntity =  emojiMobEntity;
     }
 
-    damage(int) {
+    damage (int) {
         this.jsonMobEntity.damage = int;
         return this;
     }
 
-    missChance(int) {
+    missChance (int) {
         this.jsonMobEntity.missChance = int;
         return this;
     }
 
-    evasionChance(int) {
+    evasionChance (int) {
         this.jsonMobEntity.evasionChance = int;
         return this;
     }
 
-    rarity(int) {
+    rarity (int) {
         this.jsonMobEntity.rarity = int;
         return this;
     }
-
-    returnJSON() {
-        return this.jsonMobEntity;
+    
+    unicodeChar(str) {
+        this.jsonMobEntity.unicodeChar = str;
+        return this;
     }
-
-
 }
 
 class EntitySetGenerators {
@@ -148,6 +157,16 @@ class EntitySetGenerators {
 
     walkable(bool) {
         this.jsonSetEntity.walkable = bool;
+        return this;
+    }
+
+    name(str) {
+        this.jsonSetEntity.name = str;
+        return this;
+    }
+
+    unicodeChar(str) {
+        this.jsonSetEntity.unicodeChar = str;
         return this;
     }
 
@@ -176,8 +195,18 @@ class EntitySetGenerators {
         return this;
     }
 
-    returnJSON() {
-        return JSON.stringify(this.jsonSetEntity);
+    serialiseJSON() {
+        console.log(JSON.stringify(this.jsonSetEntity, null, 2));
+
+        fs.readFile(`./Game/data/reference.json`, (err, fileData) => {
+            let json = JSON.parse(fileData);
+            json.data[emojiUnicode(this.jsonSetEntity.unicodeChar)] = this.jsonSetEntity;
+            fs.writeFile(`./Game/data/reference.json`, JSON.stringify(json, null, 2), (err) => {
+                if (err) {
+                    return Error.GENERIC(err);
+                }
+            })
+        })
     }
 }
 
@@ -222,6 +251,14 @@ class Generators {
             })
         });
     }
+
+    static createGameReferenceJSON() {
+        fs.writeFile(`./Game/data/reference.json`, JSON.stringify(commandTemplate, null, 2), (err) => {
+            if (err) {
+                Error.GENERIC(err);
+            }
+        });
+    }
 }
 
 class ChangeJSONData {
@@ -234,13 +271,26 @@ class ChangeJSONData {
             }
             let json = JSON.parse(fileData);
             json.data[Object.keys(json.data).length + 1] = data
-            fs.writeFile(dir, JSON.stringify(json), (err) => {
+            fs.writeFile(dir, JSON.stringify(json, null, 2), (err) => {
                 if (err) {
                     console.log(Error.GENERIC(data));
                 } else {
                     console.log(Success.CREATE(data));
                 }
             })
+        })
+    }
+
+    static async readJSONData (guildID, command, data) {
+        var dir = await Directories.SPECIFICCOMMAND(guildID, command);
+        fs.readFile(dir, (err, fileData) => {
+            if (err) {
+                console.log(Error.GENERIC(err));
+            }
+            var json = JSON.parse(fileData);
+            
+            resolve(json.data[this.data]);
+            
         })
     }
 
@@ -273,7 +323,7 @@ class UUID {
     }
 }
 
-/*try {
+try {
     client.on("ready", () => {
         console.log(`Logged in as ${client.user.tag}`);
     })
@@ -293,21 +343,47 @@ class UUID {
 
 catch (err) {
     console.log(Error.GENERIC(err));
-}*/
+}
 
 //Generators.createGuildJSON("0");
-//Generators.createCommandJSON("0", "testGuild");
+//Generators.createCommandJSON("0", "peanuts");
+
+//console.log(ChangeJSONData.addJSONData(0, "hello", "welike.fortnite"));
+
+//console.log(Directories.SPECIFICCOMMAND(0, "peanuts"));
+//console.log(Directories.DATA(0));
+//Directories.SPECIFICOMMANDASYNC(0, "peanuts")
+//Directories.SPECIFICCOMMAND(0, "peanuts")
 
 async function main() {
-    console.log(new EntitySetGenerators()
+
+    //Generators.createGameReferenceJSON()
+    //console.log(await Directories.SPECIFICCOMMAND(2, "peanuets"));
+    //ChangeJSONData.addJSONData(0, "jeff", "test");
+    //ChangeJSONData.removeJSONData(0, "jeff", 1);
+    //Generators.createCommandJSON(0, "jeff");
+    /*console.log(new EntitySetGenerators()
+        .unicodeChar("🟩")
         .walkable(true)
         .encounterChance(1)
         .droppedItem("itemtest")
         .spawnableEnemies("test", new EntityMobGenerators()
+            .unicodeChar("ඞ")
             .damage(542)
-            .evasionChance(2)
-            .returnJSON())
-        .returnJSON());
+            .evasionChance(20))
+        .spawnableEnemies("test2", new EntityMobGenerators()
+            .unicodeChar("amogus")
+            .damage(420)
+            .evasionChance(0)
+            .rarity(10))
+        .spawnableEnemies("test3", new EntityMobGenerators()
+            .unicodeChar("sus!")
+            .damage(42320)
+            .evasionChance(0111)
+            .rarity(102))
+        .serialiseJSON())*/
+    //ChangeJSONData.addJSONData(0, "jeff", "test");
+    //console.log(ChangeJSONData.readJSONData(0, "jeff", 1));
 }
 
 main()
